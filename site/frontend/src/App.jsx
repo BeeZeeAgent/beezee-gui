@@ -11,10 +11,25 @@ import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/s
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   MessageSquare, History, Settings, Menu, Square, Plus, Search, X,
-  Wifi, WifiOff, Loader2, ChevronRight, Terminal, AlertTriangle, RefreshCw,
+  Wifi, WifiOff, Loader2, SendHorizontal, AlertTriangle, RefreshCw,
   Copy, Play, Bot,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+const BeeZeeLogo = ({ className }) => (
+  <svg className={className} viewBox="0 0 37 37.4" xmlns="http://www.w3.org/2000/svg">
+    <g transform="translate(-49.89,-134.66)">
+      <path style={{fill:'#2b2200',stroke:'#000',strokeWidth:0.26}} d="m 50.04,150.86 9.09,-15.68 17.86,-0.4 9.72,16.06 -9,15.67 -15.9,-0.15 -5.67,5.26 1.58,-7.61 z"/>
+      <path style={{fill:'#ff0',stroke:'#000',strokeWidth:0.26}} d="m 60.52,164.14 15.7,0.35 1.57,-2.93 -15.41,-0.35 -7.95,-13.19 -1.95,2.88 z"/>
+      <path style={{fill:'#ff0',stroke:'#000',strokeWidth:0.26}} d="m 81.12,155.89 -1.98,3.17 -15.32,-0.23 -7.93,-13.43 1.69,-2.95 7.79,13.12 z"/>
+      <path style={{fill:'#ff0',stroke:'#000',strokeWidth:0.26}} d="m 59.19,139.81 1.32,-2.49 15.64,-0.15 7.8,13.53 -1.47,2.62 -15.74,-0.2 -7.54,-13.3"/>
+      <ellipse style={{fill:'#000',strokeWidth:0.26}} cx="85.19" cy="-132.79" rx="1.49" ry="2.54" transform="rotate(121.61)"/>
+      <ellipse style={{fill:'#000',strokeWidth:0.26}} cx="81.59" cy="-139.09" rx="1.49" ry="2.54" transform="rotate(121.61)"/>
+      <path style={{fill:'#000',strokeWidth:0.26}} d="m 72.18,146.82 a 2.54,1.49 31.61 0 0 1.25,1.23 2.54,1.49 31.61 0 0 2.94,0.07 2.54,1.49 31.61 0 0 -0.09,-1.29 z"/>
+      <path style={{fill:'#aef',stroke:'#000',strokeWidth:0.18}} d="m 57.13,169.88 1.09,-5.24 0.91,1.52 1.91,0.1 -3.91,3.63"/>
+    </g>
+  </svg>
+);
 
 const CWD_KEY = 'agentgui.cwd';
 
@@ -90,8 +105,8 @@ function DesktopSidebar({ tab, onNav, health, live }) {
   return (
     <aside className="hidden lg:flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar h-screen sticky top-0">
       <div className="flex items-center gap-2 px-4 py-4 border-b border-sidebar-border">
-        <Terminal className="h-5 w-5 text-sidebar-primary" />
-        <span className="font-semibold text-sidebar-foreground tracking-tight">agentgui</span>
+        <BeeZeeLogo className="h-7 w-7" />
+        <span className="font-semibold text-sidebar-foreground tracking-tight">BeeZee</span>
       </div>
       <ScrollArea className="flex-1">
         <NavList tab={tab} onNav={onNav} />
@@ -130,8 +145,8 @@ function MobileHeader({ tab, onNav, health }) {
         <SheetContent side="left" className="w-64 p-0 bg-sidebar border-sidebar-border">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
           <div className="flex items-center gap-2 px-4 py-4 border-b border-sidebar-border">
-            <Terminal className="h-5 w-5 text-sidebar-primary" />
-            <span className="font-semibold text-sidebar-foreground">agentgui</span>
+            <BeeZeeLogo className="h-7 w-7" />
+            <span className="font-semibold text-sidebar-foreground">BeeZee</span>
           </div>
           <NavList tab={tab} onNav={onNav} onClose={() => setOpen(false)} />
         </SheetContent>
@@ -197,7 +212,7 @@ function ChatTab({ state, dispatch, models, selectedModel, setSelectedModel }) {
           ? <Button size="sm" variant="outline" onClick={() => dispatch({ type: 'CANCEL' })} className="shrink-0 h-8 gap-1.5">
               <Square className="h-3.5 w-3.5" /> Stop
             </Button>
-          : <Button size="sm" variant="outline" onClick={() => dispatch({ type: 'NEW' })} className="shrink-0 h-8 gap-1.5">
+          : <Button size="sm" onClick={() => dispatch({ type: 'NEW' })} className="shrink-0 h-8 gap-1.5 bg-yellow-400 text-black hover:bg-yellow-500">
               <Plus className="h-3.5 w-3.5" /> New
             </Button>
         }
@@ -267,7 +282,7 @@ function ChatTab({ state, dispatch, models, selectedModel, setSelectedModel }) {
             size="icon"
             className="h-10 w-10 shrink-0"
           >
-            <ChevronRight className="h-4 w-4" />
+            <SendHorizontal className="h-4 w-4" />
           </Button>
         </div>
       </div>
