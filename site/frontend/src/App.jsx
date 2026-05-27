@@ -943,10 +943,8 @@ export default function App() {
 
   // Sync session filter with selected agent — 'codex' selector → show codex sessions, etc.
   useEffect(() => {
-    const id = activeAgentId(selectedModel);
-    const knownIds = new Set(['claude-code', ...(historyAgents || []).map(a => a.id)]);
-    setAgentFilter(knownIds.has(id) ? id : 'all');
-  }, [selectedModel, historyAgents]);
+    setAgentFilter(activeAgentId(selectedModel) || 'claude-code');
+  }, [selectedModel]);
 
   const persistCwd = useCallback((next) => {
     setCwd(next);
