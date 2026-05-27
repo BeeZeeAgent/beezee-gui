@@ -209,6 +209,21 @@ export async function listModels(base) {
   return agents || [];
 }
 
+export async function listHistoryAgents(base) {
+  const { agents } = await wsCall(base, 'history.agents', {});
+  return agents || [];
+}
+
+export async function listAgentSessions(base) {
+  const { sessions } = await wsCall(base, 'history.agentSessions', {});
+  return sessions || [];
+}
+
+export async function getAgentSessionEvents(base, sid) {
+  const { events } = await wsCall(base, 'history.agentSessionEvents', { sid });
+  return events || [];
+}
+
 export async function getHome(base) {
   return wsCall(base, 'home', {});
 }

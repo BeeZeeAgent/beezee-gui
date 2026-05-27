@@ -130,14 +130,14 @@ function NavList({ tab, onNav, onClose }) {
 function WorkspacePanel({
   backend, cwd, setCwd, browsePath, setBrowsePath, folders, folderFilter, setFolderFilter,
   folderError, sessions, selectedSid, selectedModel, onSelectSession, onNav, refreshFolders,
+  agentFilter, setAgentFilter, historyAgents,
 }) {
   const [sessionFilter, setSessionFilter] = useState('');
-  const agentId = activeAgentId(selectedModel);
   const filteredFolders = folders
     .filter(f => !folderFilter.trim() || f.name.toLowerCase().includes(folderFilter.trim().toLowerCase()));
   const folderSessions = (Array.isArray(sessions) ? sessions : [])
     .filter(s => (s.cwd || '') === cwd)
-    .filter(s => sessionAgentId(s) === agentId)
+    .filter(s => agentFilter === 'all' || (s.agentId || 'claude-code') === agentFilter)
     .filter(s => !s.isSubagent)
     .filter(s => {
       const q = sessionFilter.trim().toLowerCase();
@@ -241,9 +241,21 @@ function WorkspacePanel({
             />
           </div>
         </div>
+        {historyAgents?.length > 0 && (
+          <div className="flex flex-wrap gap-1 px-3 pb-1.5 shrink-0">
+            {[{ id: 'all', label: 'all' }, { id: 'claude-code', label: 'claude' }, ...historyAgents].map(a => (
+              <button
+                key={a.id}
+                onClick={() => setAgentFilter(a.id)}
+                className={cn('text-[10px] px-1.5 py-0.5 rounded border transition-colors',
+                  agentFilter === a.id ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground')}
+              >{a.label || a.id}</button>
+            ))}
+          </div>
+        )}
         <div className="flex items-center justify-between gap-2 px-4 pb-1 shrink-0">
           <span className="text-xs font-medium text-sidebar-foreground">Sessions</span>
-          <span className="text-[10px] text-muted-foreground">{agentId} · {folderSessions.length}</span>
+          <span className="text-[10px] text-muted-foreground">{folderSessions.length}</span>
         </div>
         <ScrollArea className="min-h-0 flex-1">
           <div className="px-2 pb-3">
@@ -254,7 +266,7 @@ function WorkspacePanel({
                 {folderSessions.map(s => (
                   <button
                     key={s.sid}
-                    onClick={() => { onSelectSession(s.sid); onNav('history'); }}
+                    onClick={() => { onSelectSession(s.sid, s.agentId); onNav('history'); }}
                     className={cn(
                       'rounded-md px-2 py-1.5 text-left text-xs transition-colors',
                       selectedSid === s.sid ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
@@ -262,7 +274,9 @@ function WorkspacePanel({
                     title={s.title || s.sid}
                   >
                     <span className="block truncate font-medium">{s.title || s.sid}</span>
-                    <span className="block truncate text-[10px] opacity-70">{fmtRelTime(s.last)} · {(s.events || 0)} ev</span>
+                    <span className="block truncate text-[10px] opacity-70">
+                      {s.agentId && s.agentId !== 'claude-code' ? s.agentId + ' · ' : ''}{fmtRelTime(s.last)} · {(s.events || 0)} ev
+                    </span>
                   </button>
                 ))}
               </div>
@@ -275,7 +289,7 @@ function WorkspacePanel({
 }
 
 function DesktopSidebar(props) {
-  const { tab, onNav, health } = props;
+  const { tab, onNav, health, models, selectedModel, setSelectedModel } = props;
   const ok = health.status === 'ok';
   return (
     <aside className="hidden lg:flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar h-screen sticky top-0">
@@ -285,6 +299,19 @@ function DesktopSidebar(props) {
       </div>
       <ScrollArea className="flex-1">
         <NavList tab={tab} onNav={onNav} />
+        <div className="px-3 py-2 border-t border-sidebar-border mt-1">
+          <p className="text-[10px] font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">Agent</p>
+          <Select value={selectedModel} onValueChange={setSelectedModel}>
+            <SelectTrigger className="h-8 text-xs w-full bg-background/70">
+              <SelectValue placeholder="— select —" />
+            </SelectTrigger>
+            <SelectContent>
+              {models.map(m => (
+                <SelectItem key={m.id} value={m.id} className="text-xs">{m.id}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </ScrollArea>
       <div className="px-4 py-3 border-t border-sidebar-border">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -367,7 +394,7 @@ function ChatTab({ state, dispatch, models, selectedModel, setSelectedModel }) {
     <div className="flex flex-col h-full">
       {/* toolbar */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
-        <div className="flex-1 min-w-0">
+        <div className="lg:hidden flex-1 min-w-0">
           <Select value={selectedModel} onValueChange={setSelectedModel}>
             <SelectTrigger className="h-8 text-xs w-full max-w-xs">
               <SelectValue placeholder="— select model —" />
@@ -473,7 +500,8 @@ function ChatTab({ state, dispatch, models, selectedModel, setSelectedModel }) {
 // ─── History tab ───────────────────────────────────────────────────────────
 function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setSearchQ,
   searchHits, showSubagents, setShowSubagents, sessionsLimit, setSessionsLimit,
-  projectFilter, setProjectFilter, live, onSelectSession, onResumeInChat, cwd, selectedModel }) {
+  projectFilter, setProjectFilter, agentFilter, setAgentFilter, historyAgents,
+  live, onSelectSession, onResumeInChat, cwd, selectedModel }) {
 
   const [localQ, setLocalQ] = useState(searchQ);
   const debounceRef = useRef(null);
@@ -486,9 +514,8 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
 
   const visibleSessions = (() => {
     let arr = Array.isArray(sessions) ? sessions : [];
-    const agentId = activeAgentId(selectedModel);
     if (cwd) arr = arr.filter(s => (s.cwd || '') === cwd);
-    arr = arr.filter(s => sessionAgentId(s) === agentId);
+    if (agentFilter !== 'all') arr = arr.filter(s => (s.agentId || 'claude-code') === agentFilter);
     if (!showSubagents) arr = arr.filter(s => !s.isSubagent);
     if (projectFilter) {
       const pf = projectFilter.toLowerCase();
@@ -498,10 +525,8 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
   })();
 
   const uniqueProjects = (() => {
-    const agentId = activeAgentId(selectedModel);
     const arr = (Array.isArray(sessions) ? sessions : [])
-      .filter(s => !cwd || (s.cwd || '') === cwd)
-      .filter(s => sessionAgentId(s) === agentId);
+      .filter(s => !cwd || (s.cwd || '') === cwd);
     const seen = new Map();
     for (const s of arr) {
       if (!s.project) continue;
@@ -512,15 +537,13 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
 
   const subagentCount = (Array.isArray(sessions) ? sessions : [])
     .filter(s => !cwd || (s.cwd || '') === cwd)
-    .filter(s => sessionAgentId(s) === activeAgentId(selectedModel))
     .filter(s => s.isSubagent).length;
   const searching = !!searchHits;
-  const agentId = activeAgentId(selectedModel);
   const sessionBySid = new Map((Array.isArray(sessions) ? sessions : []).map(s => [s.sid, s]));
   const searchVisible = (searchHits?.results || [])
     .filter(hit => {
       const s = sessionBySid.get(hit.sid) || hit;
-      return (!cwd || (s.cwd || '') === cwd) && sessionAgentId(s) === agentId;
+      return !cwd || (s.cwd || '') === cwd;
     });
   const visible = searching ? searchVisible.slice(0, 60) : visibleSessions.slice(0, sessionsLimit);
   const truncatedBy = searching
@@ -556,6 +579,19 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
               </button>
             )}
           </div>
+
+          {historyAgents?.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {[{ id: 'all', label: 'all' }, { id: 'claude-code', label: 'claude' }, ...historyAgents].map(a => (
+                <button
+                  key={a.id}
+                  onClick={() => setAgentFilter(a.id)}
+                  className={cn('text-xs px-2 py-0.5 rounded-full border transition-colors',
+                    agentFilter === a.id ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground')}
+                >{a.label || a.id}</button>
+              ))}
+            </div>
+          )}
 
           {!searching && uniqueProjects.length > 1 && (
             <div className="flex flex-wrap gap-1">
@@ -595,7 +631,6 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
           <p className="text-xs text-muted-foreground">
             {searching ? `${searchVisible.length} match${searchVisible.length !== 1 ? 'es' : ''}` : `${visibleSessions.length} session${visibleSessions.length !== 1 ? 's' : ''}`}
             {subagentCount && !showSubagents ? ` (+${subagentCount} sub)` : ''}
-            {!searching ? ` · ${activeAgentId(selectedModel)}` : ''}
           </p>
         </div>
 
@@ -613,16 +648,18 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
             {visible.map((s, i) => {
               const isSearch = searching;
               const sid = s.sid;
+              const sAgentId = s.agentId || 'claude-code';
+              const agentTag = sAgentId !== 'claude-code' ? sAgentId + ' · ' : '';
               const title = isSearch ? (s.snippet || '(no snippet)') : ((s.isSubagent ? '↳ ' : '') + (s.title || s.project || s.sid));
               const sub = isSearch
                 ? (s.project || '?') + ' · ' + (s.role || '?') + (s.tool ? ' · ' + s.tool : '')
-                : fmtRelTime(s.last) + ' · ' + (s.events || 0) + ' ev · ' + (s.tools || 0) + ' tools' + (s.errors ? ' · ' + s.errors + ' err' : '');
-              const rail = s.errors ? 'flame' : (s.isSubagent ? 'purple' : 'green');
+                : agentTag + fmtRelTime(s.last) + ' · ' + (s.events || 0) + ' ev · ' + (s.tools || 0) + ' tools' + (s.errors ? ' · ' + s.errors + ' err' : '');
+              const rail = s.errors ? 'flame' : (s.isSubagent ? 'purple' : sAgentId !== 'claude-code' ? 'blue' : 'green');
 
               return (
                 <button
                   key={sid + i}
-                  onClick={() => onSelectSession(sid)}
+                  onClick={() => onSelectSession(sid, sAgentId)}
                   className={cn(
                     'flex items-start gap-2.5 rounded-md px-2.5 py-2 text-left w-full transition-colors group',
                     selectedSid === sid
@@ -631,7 +668,7 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
                   )}
                 >
                   <span className={cn('h-1.5 w-1.5 rounded-full shrink-0 mt-1.5',
-                    rail === 'flame' ? 'bg-orange-400' : rail === 'purple' ? 'bg-purple-400' : 'bg-green-400'
+                    rail === 'flame' ? 'bg-orange-400' : rail === 'purple' ? 'bg-purple-400' : rail === 'blue' ? 'bg-blue-400' : 'bg-green-400'
                   )} />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium truncate leading-tight">{title}</p>
@@ -670,9 +707,11 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
                 : selectedSid}
             </p>
             <div className="flex gap-2 mt-3">
-              <Button size="sm" onClick={() => onResumeInChat(sess || { sid: selectedSid })} className="h-8 gap-1.5 text-xs">
-                <Play className="h-3.5 w-3.5" /> Open in chat
-              </Button>
+              {(!sess?.agentId || sess.agentId === 'claude-code') && (
+                <Button size="sm" onClick={() => onResumeInChat(sess || { sid: selectedSid })} className="h-8 gap-1.5 text-xs">
+                  <Play className="h-3.5 w-3.5" /> Open in chat
+                </Button>
+              )}
               <Button size="sm" variant="outline" onClick={() => { try { navigator.clipboard.writeText(selectedSid); } catch {} }} className="h-8 gap-1.5 text-xs">
                 <Copy className="h-3.5 w-3.5" /> Copy SID
               </Button>
@@ -888,6 +927,7 @@ export default function App() {
 
   const [sessions, setSessions] = useState([]);
   const [selectedSid, setSelectedSid] = useState(null);
+  const [selectedSidAgent, setSelectedSidAgent] = useState(null); // agentId of selected session
   const [events, setEvents] = useState([]);
   const [historyError, setHistoryError] = useState(null);
   const [searchQ, setSearchQ] = useState('');
@@ -895,6 +935,8 @@ export default function App() {
   const [showSubagents, setShowSubagents] = useState(false);
   const [sessionsLimit, setSessionsLimit] = useState(60);
   const [projectFilter, setProjectFilter] = useState('');
+  const [agentFilter, setAgentFilter] = useState('all');
+  const [historyAgents, setHistoryAgents] = useState([]);
   const [live, setLive] = useState({ es: null, connected: false, lastEventTs: 0, error: null, eventCount: 0, reconnects: 0 });
   const liveRef = useRef(live);
   liveRef.current = live;
@@ -960,26 +1002,39 @@ export default function App() {
   // History
   const refreshHistory = useCallback(async () => {
     try {
-      const [baseSessions, cwdSessions] = await Promise.all([
+      const [baseSessions, cwdSessions, agentSessions] = await Promise.all([
         B.listSessions(backend).catch(() => []),
         cwd ? B.listSessionsForCwd(backend, cwd).catch(() => []) : Promise.resolve([]),
+        B.listAgentSessions(backend).catch(() => []),
       ]);
       const bySid = new Map();
-      for (const s of [...baseSessions, ...cwdSessions]) bySid.set(s.sid, s);
+      for (const s of [...baseSessions, ...cwdSessions]) bySid.set(s.sid, { ...s, agentId: s.agentId || 'claude-code' });
+      for (const s of agentSessions) if (!bySid.has(s.sid)) bySid.set(s.sid, s);
       setSessions([...bySid.values()]);
       setHistoryError(null);
     } catch (e) {
       setHistoryError(e.message);
     }
+    // Also refresh known agent types for the filter
+    B.listHistoryAgents(backend).then(agents => {
+      setHistoryAgents(agents);
+    }).catch(() => {});
   }, [backend, cwd]);
 
-  const loadSession = useCallback(async (sid) => {
+  const loadSession = useCallback(async (sid, agentIdHint) => {
     setSelectedSid(sid);
+    setSelectedSidAgent(agentIdHint || null);
     setEvents([]);
     writeHash(sid);
     try {
-      let evs = cwd ? await B.getSessionEventsForCwd(backend, sid, cwd).catch(() => []) : [];
-      if (!evs.length) evs = await B.getSessionEvents(backend, sid);
+      const isClaudeCode = !agentIdHint || agentIdHint === 'claude-code';
+      let evs = [];
+      if (isClaudeCode) {
+        evs = cwd ? await B.getSessionEventsForCwd(backend, sid, cwd).catch(() => []) : [];
+        if (!evs.length) evs = await B.getSessionEvents(backend, sid);
+      } else {
+        evs = await B.getAgentSessionEvents(backend, sid);
+      }
       setEvents(evs);
     } catch (e) {
       setEvents([{ ts: Date.now(), role: 'error', type: 'fetch', text: e.message }]);
@@ -1136,6 +1191,9 @@ export default function App() {
         onNav={navTo}
         health={health}
         live={live}
+        models={models}
+        selectedModel={selectedModel}
+        setSelectedModel={setSelectedModel}
       />
       <WorkspaceSidebar
         tab={tab}
@@ -1156,6 +1214,9 @@ export default function App() {
         selectedModel={selectedModel}
         onSelectSession={loadSession}
         refreshFolders={refreshFolders}
+        agentFilter={agentFilter}
+        setAgentFilter={setAgentFilter}
+        historyAgents={historyAgents}
       />
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
@@ -1178,6 +1239,9 @@ export default function App() {
           selectedModel={selectedModel}
           onSelectSession={loadSession}
           refreshFolders={refreshFolders}
+          agentFilter={agentFilter}
+          setAgentFilter={setAgentFilter}
+          historyAgents={historyAgents}
         />
 
         <main className="flex-1 overflow-hidden">
@@ -1205,6 +1269,9 @@ export default function App() {
               setSessionsLimit={setSessionsLimit}
               projectFilter={projectFilter}
               setProjectFilter={setProjectFilter}
+              agentFilter={agentFilter}
+              setAgentFilter={setAgentFilter}
+              historyAgents={historyAgents}
               live={live}
               onSelectSession={loadSession}
               onResumeInChat={resumeInChat}
