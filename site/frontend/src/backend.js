@@ -209,6 +209,24 @@ export async function listModels(base) {
   return agents || [];
 }
 
+export async function getHome(base) {
+  return wsCall(base, 'home', {});
+}
+
+export async function listFolders(base, path) {
+  return wsCall(base, 'folders', { path });
+}
+
+export async function listSessionsForCwd(base, cwd) {
+  const { sessions } = await wsCall(base, 'history.sessionsForCwd', { cwd });
+  return sessions || [];
+}
+
+export async function getSessionEventsForCwd(base, sid, cwd) {
+  const { events } = await wsCall(base, 'history.sessionEventsForCwd', { sid, cwd });
+  return events || [];
+}
+
 // ---------- Streaming chat (WS) ----------
 //
 // Yields events of shape:
@@ -267,6 +285,7 @@ export async function* streamChat(base, { model, messages, signal, agentId, resu
       else if (block?.type === 'tool_use') push({ type: 'tool', block });
       else if (block?.type === 'tool_result') push({ type: 'tool', block });
       else if (block?.type === 'result') push({ type: 'result', block });
+      else if (block?.type === 'available_commands') push({ type: 'commands', commands: block.commands || [] });
     } else if (ev.type === 'streaming_complete') {
       done = true;
       if (resolveWait) { resolveWait(); resolveWait = null; }

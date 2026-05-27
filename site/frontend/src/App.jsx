@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   MessageSquare, History, Settings, Menu, Square, Plus, Search, X,
   Wifi, WifiOff, Loader2, SendHorizontal, AlertTriangle, RefreshCw,
-  Copy, Play, Bot,
+  Copy, Play, Bot, Folder, FolderOpen, ArrowUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -76,6 +76,33 @@ const NAV_ITEMS = [
   { id: 'settings', label: 'Settings', Icon: Settings },
 ];
 
+function basename(p) {
+  if (!p) return '';
+  const clean = String(p).replace(/\/+$/, '');
+  return clean.split('/').filter(Boolean).pop() || clean || '/';
+}
+
+function dirname(p) {
+  if (!p || p === '/') return '/';
+  const clean = String(p).replace(/\/+$/, '');
+  const i = clean.lastIndexOf('/');
+  return i <= 0 ? '/' : clean.slice(0, i);
+}
+
+function joinPath(root, name) {
+  if (!root || root === '/') return '/' + name;
+  return root.replace(/\/+$/, '') + '/' + name;
+}
+
+function activeAgentId(selectedModel) {
+  if (!selectedModel || /^[a-z][a-z0-9-]*$/.test(selectedModel)) return selectedModel || 'claude-code';
+  return 'claude-code';
+}
+
+function sessionAgentId(session) {
+  return session?.agentId || session?.agent || 'claude-code';
+}
+
 // ─── Sidebar nav list ──────────────────────────────────────────────────────
 function NavList({ tab, onNav, onClose }) {
   return (
@@ -100,7 +127,129 @@ function NavList({ tab, onNav, onClose }) {
 }
 
 // ─── Desktop sidebar ───────────────────────────────────────────────────────
-function DesktopSidebar({ tab, onNav, health, live }) {
+function WorkspacePanel({
+  backend, cwd, setCwd, browsePath, setBrowsePath, folders, folderFilter, setFolderFilter,
+  folderError, sessions, selectedSid, selectedModel, onSelectSession, onNav, refreshFolders,
+}) {
+  const agentId = activeAgentId(selectedModel);
+  const filteredFolders = folders
+    .filter(f => !folderFilter.trim() || f.name.toLowerCase().includes(folderFilter.trim().toLowerCase()))
+    .slice(0, 80);
+  const folderSessions = (Array.isArray(sessions) ? sessions : [])
+    .filter(s => (s.cwd || '') === cwd)
+    .filter(s => sessionAgentId(s) === agentId)
+    .filter(s => !s.isSubagent)
+    .sort((a, b) => (b.last || 0) - (a.last || 0))
+    .slice(0, 12);
+
+  const chooseCwd = (next) => {
+    setCwd(next);
+    localStorage.setItem(CWD_KEY, next);
+    setBrowsePath(next);
+    refreshFolders(next);
+  };
+
+  return (
+    <div className="px-2 pb-3">
+      <div className="px-2 py-2">
+        <div className="flex items-center gap-2 text-xs font-medium text-sidebar-foreground">
+          <FolderOpen className="h-3.5 w-3.5 text-sidebar-primary" />
+          <span className="truncate">{basename(cwd) || 'workspace'}</span>
+        </div>
+        <p className="mt-0.5 truncate text-[10px] text-muted-foreground" title={cwd}>{cwd}</p>
+      </div>
+
+      <div className="px-2 pb-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            value={folderFilter}
+            onChange={e => setFolderFilter(e.target.value)}
+            placeholder="Filter folders"
+            className="h-8 pl-8 text-xs bg-background/70"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1 px-2 pb-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={() => {
+            const parent = dirname(browsePath);
+            setBrowsePath(parent);
+            refreshFolders(parent);
+          }}
+        >
+          <ArrowUp className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 min-w-0 flex-1 justify-start px-2 text-xs"
+          title={browsePath}
+          onClick={() => chooseCwd(browsePath)}
+        >
+          <span className="truncate">{basename(browsePath) || '/'}</span>
+        </Button>
+      </div>
+
+      {folderError && <p className="px-2 py-1 text-xs text-destructive">{folderError}</p>}
+      <div className="max-h-48 overflow-hidden px-1">
+        {filteredFolders.map(f => {
+          const full = joinPath(browsePath, f.name);
+          return (
+            <button
+              key={full}
+              onClick={() => chooseCwd(full)}
+              onDoubleClick={() => { setBrowsePath(full); refreshFolders(full); }}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                cwd === full ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+              )}
+              title={full}
+            >
+              <Folder className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{f.name}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <Separator className="my-3 bg-sidebar-border" />
+
+      <div className="px-2">
+        <div className="flex items-center justify-between gap-2 pb-1">
+          <span className="text-xs font-medium text-sidebar-foreground">Sessions</span>
+          <span className="text-[10px] text-muted-foreground">{agentId}</span>
+        </div>
+        {folderSessions.length === 0 ? (
+          <p className="py-2 text-xs text-muted-foreground">No sessions in this folder</p>
+        ) : (
+          <div className="flex flex-col gap-0.5">
+            {folderSessions.map(s => (
+              <button
+                key={s.sid}
+                onClick={() => { onSelectSession(s.sid); onNav('history'); }}
+                className={cn(
+                  'rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                  selectedSid === s.sid ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                )}
+              >
+                <span className="block truncate font-medium">{s.title || s.sid}</span>
+                <span className="block truncate text-[10px] opacity-70">{fmtRelTime(s.last)} · {(s.events || 0)} ev</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DesktopSidebar(props) {
+  const { tab, onNav, health, live } = props;
   const ok = health.status === 'ok';
   return (
     <aside className="hidden lg:flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar h-screen sticky top-0">
@@ -110,6 +259,8 @@ function DesktopSidebar({ tab, onNav, health, live }) {
       </div>
       <ScrollArea className="flex-1">
         <NavList tab={tab} onNav={onNav} />
+        <Separator className="my-2 bg-sidebar-border" />
+        <WorkspacePanel {...props} />
       </ScrollArea>
       <div className="px-4 py-3 border-t border-sidebar-border">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -130,7 +281,8 @@ function DesktopSidebar({ tab, onNav, health, live }) {
 }
 
 // ─── Mobile header ─────────────────────────────────────────────────────────
-function MobileHeader({ tab, onNav, health }) {
+function MobileHeader(props) {
+  const { tab, onNav, health } = props;
   const [open, setOpen] = useState(false);
   const ok = health.status === 'ok';
   const current = NAV_ITEMS.find(n => n.id === tab);
@@ -149,6 +301,8 @@ function MobileHeader({ tab, onNav, health }) {
             <span className="font-semibold text-sidebar-foreground">BeeZee</span>
           </div>
           <NavList tab={tab} onNav={onNav} onClose={() => setOpen(false)} />
+          <Separator className="my-2 bg-sidebar-border" />
+          <WorkspacePanel {...props} onNav={(t) => { onNav(t); setOpen(false); }} />
         </SheetContent>
       </Sheet>
       <span className="font-medium text-sm flex-1">{current?.label ?? tab}</span>
@@ -293,7 +447,7 @@ function ChatTab({ state, dispatch, models, selectedModel, setSelectedModel }) {
 // ─── History tab ───────────────────────────────────────────────────────────
 function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setSearchQ,
   searchHits, showSubagents, setShowSubagents, sessionsLimit, setSessionsLimit,
-  projectFilter, setProjectFilter, live, onSelectSession, onResumeInChat }) {
+  projectFilter, setProjectFilter, live, onSelectSession, onResumeInChat, cwd, selectedModel }) {
 
   const [localQ, setLocalQ] = useState(searchQ);
   const debounceRef = useRef(null);
@@ -306,6 +460,9 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
 
   const visibleSessions = (() => {
     let arr = Array.isArray(sessions) ? sessions : [];
+    const agentId = activeAgentId(selectedModel);
+    if (cwd) arr = arr.filter(s => (s.cwd || '') === cwd);
+    arr = arr.filter(s => sessionAgentId(s) === agentId);
     if (!showSubagents) arr = arr.filter(s => !s.isSubagent);
     if (projectFilter) {
       const pf = projectFilter.toLowerCase();
@@ -315,7 +472,10 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
   })();
 
   const uniqueProjects = (() => {
-    const arr = Array.isArray(sessions) ? sessions : [];
+    const agentId = activeAgentId(selectedModel);
+    const arr = (Array.isArray(sessions) ? sessions : [])
+      .filter(s => !cwd || (s.cwd || '') === cwd)
+      .filter(s => sessionAgentId(s) === agentId);
     const seen = new Map();
     for (const s of arr) {
       if (!s.project) continue;
@@ -324,11 +484,21 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
     return Array.from(seen.entries()).sort((a, b) => b[1] - a[1]);
   })();
 
-  const subagentCount = (Array.isArray(sessions) ? sessions : []).filter(s => s.isSubagent).length;
+  const subagentCount = (Array.isArray(sessions) ? sessions : [])
+    .filter(s => !cwd || (s.cwd || '') === cwd)
+    .filter(s => sessionAgentId(s) === activeAgentId(selectedModel))
+    .filter(s => s.isSubagent).length;
   const searching = !!searchHits;
-  const visible = searching ? (searchHits.results || []).slice(0, 60) : visibleSessions.slice(0, sessionsLimit);
+  const agentId = activeAgentId(selectedModel);
+  const sessionBySid = new Map((Array.isArray(sessions) ? sessions : []).map(s => [s.sid, s]));
+  const searchVisible = (searchHits?.results || [])
+    .filter(hit => {
+      const s = sessionBySid.get(hit.sid) || hit;
+      return (!cwd || (s.cwd || '') === cwd) && sessionAgentId(s) === agentId;
+    });
+  const visible = searching ? searchVisible.slice(0, 60) : visibleSessions.slice(0, sessionsLimit);
   const truncatedBy = searching
-    ? Math.max(0, (searchHits.results || []).length - 60)
+    ? Math.max(0, searchVisible.length - 60)
     : Math.max(0, visibleSessions.length - sessionsLimit);
 
   const sess = (Array.isArray(sessions) ? sessions : []).find(s => s.sid === selectedSid);
@@ -397,8 +567,9 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
           )}
 
           <p className="text-xs text-muted-foreground">
-            {searching ? `${(searchHits.results || []).length} match${(searchHits.results || []).length !== 1 ? 'es' : ''}` : `${visibleSessions.length} session${visibleSessions.length !== 1 ? 's' : ''}`}
+            {searching ? `${searchVisible.length} match${searchVisible.length !== 1 ? 'es' : ''}` : `${visibleSessions.length} session${visibleSessions.length !== 1 ? 's' : ''}`}
             {subagentCount && !showSubagents ? ` (+${subagentCount} sub)` : ''}
+            {!searching ? ` · ${activeAgentId(selectedModel)}` : ''}
           </p>
         </div>
 
@@ -678,6 +849,10 @@ export default function App() {
   const [backend, setBackend] = useState(() => B.getBackend());
   const [health, setHealth] = useState({ status: 'unknown' });
   const [cwd, setCwd] = useState(() => localStorage.getItem(CWD_KEY) || '');
+  const [browsePath, setBrowsePath] = useState(() => localStorage.getItem(CWD_KEY) || '');
+  const [folders, setFolders] = useState([]);
+  const [folderFilter, setFolderFilter] = useState('');
+  const [folderError, setFolderError] = useState('');
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState('');
 
@@ -698,6 +873,25 @@ export default function App() {
   const liveRef = useRef(live);
   liveRef.current = live;
 
+  const persistCwd = useCallback((next) => {
+    setCwd(next);
+    if (next) localStorage.setItem(CWD_KEY, next);
+    else localStorage.removeItem(CWD_KEY);
+  }, []);
+
+  const refreshFolders = useCallback(async (path) => {
+    const target = path || browsePath || cwd || health.cwd || '';
+    if (!target) return;
+    try {
+      const result = await B.listFolders(backend, target);
+      setFolders(Array.isArray(result?.folders) ? result.folders : []);
+      setFolderError('');
+    } catch (e) {
+      setFolders([]);
+      setFolderError(e.message);
+    }
+  }, [backend, browsePath, cwd, health.cwd]);
+
   // Streaming chat
   const sendChat = useCallback(async (text) => {
     if (!text || !selectedModel || chat.busy) return;
@@ -713,6 +907,9 @@ export default function App() {
         cwd: cwd || undefined,
       })) {
         if (ev.type === 'text') dispatchChat({ type: 'APPEND', text: ev.text });
+        if (ev.type === 'commands' && ev.commands?.length) {
+          dispatchChat({ type: 'APPEND', text: '\n\nCommands: ' + ev.commands.map(c => '/' + c.name).join(', ') });
+        }
         if (ev.type === 'error') dispatchChat({ type: 'APPEND', text: '\n[error] ' + JSON.stringify(ev.error) });
       }
     } catch (e) {
@@ -737,25 +934,31 @@ export default function App() {
   // History
   const refreshHistory = useCallback(async () => {
     try {
-      const s = await B.listSessions(backend);
-      setSessions(s);
+      const [baseSessions, cwdSessions] = await Promise.all([
+        B.listSessions(backend).catch(() => []),
+        cwd ? B.listSessionsForCwd(backend, cwd).catch(() => []) : Promise.resolve([]),
+      ]);
+      const bySid = new Map();
+      for (const s of [...baseSessions, ...cwdSessions]) bySid.set(s.sid, s);
+      setSessions([...bySid.values()]);
       setHistoryError(null);
     } catch (e) {
       setHistoryError(e.message);
     }
-  }, [backend]);
+  }, [backend, cwd]);
 
   const loadSession = useCallback(async (sid) => {
     setSelectedSid(sid);
     setEvents([]);
     writeHash(sid);
     try {
-      const evs = await B.getSessionEvents(backend, sid);
+      let evs = cwd ? await B.getSessionEventsForCwd(backend, sid, cwd).catch(() => []) : [];
+      if (!evs.length) evs = await B.getSessionEvents(backend, sid);
       setEvents(evs);
     } catch (e) {
       setEvents([{ ts: Date.now(), role: 'error', type: 'fetch', text: e.message }]);
     }
-  }, [backend]);
+  }, [backend, cwd]);
 
   // Live stream
   const openLiveStream = useCallback(() => {
@@ -833,7 +1036,10 @@ export default function App() {
         const r = await B.probeBackend(backend);
         const newHealth = r.ok ? { status: 'ok', ...r.info } : { status: 'down', ...r };
         setHealth(newHealth);
-        if (r.ok && !cwd && r.info?.cwd) setCwd(r.info.cwd);
+        if (r.ok && !cwd && r.info?.cwd) {
+          persistCwd(r.info.cwd);
+          setBrowsePath(r.info.cwd);
+        }
       } catch (e) {
         setHealth({ status: 'error', error: e.message });
       }
@@ -844,11 +1050,23 @@ export default function App() {
       } catch (e) {
         console.warn('models fetch failed:', e.message);
       }
+      try {
+        const h = await B.getHome(backend);
+        const initial = localStorage.getItem(CWD_KEY) || h.cwd || h.home;
+        if (initial) {
+          setBrowsePath(initial);
+          if (!cwd) persistCwd(initial);
+          const result = await B.listFolders(backend, initial);
+          setFolders(Array.isArray(result?.folders) ? result.folders : []);
+        }
+      } catch (e) {
+        setFolderError(e.message);
+      }
+      await refreshHistory();
 
       const initialSid = readHash();
       if (initialSid) {
         setTab('history');
-        await refreshHistory();
         await loadSession(initialSid);
         openLiveStream();
       }
@@ -865,6 +1083,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    refreshFolders(cwd);
+    refreshHistory();
+  }, [cwd, refreshFolders, refreshHistory]);
+
   const handleReconnect = useCallback((newBackend) => {
     setHealth({ status: 'unknown' });
     B.probeBackend(newBackend).then(r => {
@@ -874,14 +1097,56 @@ export default function App() {
       setModels(ms);
       if (ms[0]) setSelectedModel(m => m || ms[0].id);
     }).catch(() => {});
+    B.listFolders(newBackend, cwd || health.cwd || '/home/pi/Documents').then(r => {
+      setFolders(Array.isArray(r?.folders) ? r.folders : []);
+      setFolderError('');
+    }).catch(e => setFolderError(e.message));
   }, []);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      <DesktopSidebar tab={tab} onNav={navTo} health={health} live={live} />
+      <DesktopSidebar
+        tab={tab}
+        onNav={navTo}
+        health={health}
+        live={live}
+        backend={backend}
+        cwd={cwd}
+        setCwd={persistCwd}
+        browsePath={browsePath}
+        setBrowsePath={setBrowsePath}
+        folders={folders}
+        folderFilter={folderFilter}
+        setFolderFilter={setFolderFilter}
+        folderError={folderError}
+        sessions={sessions}
+        selectedSid={selectedSid}
+        selectedModel={selectedModel}
+        onSelectSession={loadSession}
+        refreshFolders={refreshFolders}
+      />
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <MobileHeader tab={tab} onNav={navTo} health={health} />
+        <MobileHeader
+          tab={tab}
+          onNav={navTo}
+          health={health}
+          live={live}
+          backend={backend}
+          cwd={cwd}
+          setCwd={persistCwd}
+          browsePath={browsePath}
+          setBrowsePath={setBrowsePath}
+          folders={folders}
+          folderFilter={folderFilter}
+          setFolderFilter={setFolderFilter}
+          folderError={folderError}
+          sessions={sessions}
+          selectedSid={selectedSid}
+          selectedModel={selectedModel}
+          onSelectSession={loadSession}
+          refreshFolders={refreshFolders}
+        />
 
         <main className="flex-1 overflow-hidden">
           {tab === 'chat' && (
@@ -911,6 +1176,8 @@ export default function App() {
               live={live}
               onSelectSession={loadSession}
               onResumeInChat={resumeInChat}
+              cwd={cwd}
+              selectedModel={selectedModel}
             />
           )}
           {tab === 'settings' && (
@@ -919,7 +1186,7 @@ export default function App() {
               setBackend={setBackend}
               health={health}
               cwd={cwd}
-              setCwd={setCwd}
+              setCwd={persistCwd}
               models={models}
               selectedModel={selectedModel}
               setSelectedModel={setSelectedModel}
