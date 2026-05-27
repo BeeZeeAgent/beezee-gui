@@ -131,16 +131,20 @@ function WorkspacePanel({
   backend, cwd, setCwd, browsePath, setBrowsePath, folders, folderFilter, setFolderFilter,
   folderError, sessions, selectedSid, selectedModel, onSelectSession, onNav, refreshFolders,
 }) {
+  const [sessionFilter, setSessionFilter] = useState('');
   const agentId = activeAgentId(selectedModel);
   const filteredFolders = folders
-    .filter(f => !folderFilter.trim() || f.name.toLowerCase().includes(folderFilter.trim().toLowerCase()))
-    .slice(0, 80);
+    .filter(f => !folderFilter.trim() || f.name.toLowerCase().includes(folderFilter.trim().toLowerCase()));
   const folderSessions = (Array.isArray(sessions) ? sessions : [])
     .filter(s => (s.cwd || '') === cwd)
     .filter(s => sessionAgentId(s) === agentId)
     .filter(s => !s.isSubagent)
-    .sort((a, b) => (b.last || 0) - (a.last || 0))
-    .slice(0, 12);
+    .filter(s => {
+      const q = sessionFilter.trim().toLowerCase();
+      if (!q) return true;
+      return [s.title, s.sid, s.project].some(v => (v || '').toLowerCase().includes(q));
+    })
+    .sort((a, b) => (b.last || 0) - (a.last || 0));
 
   const chooseCwd = (next) => {
     setCwd(next);
@@ -150,8 +154,8 @@ function WorkspacePanel({
   };
 
   return (
-    <div className="px-2 pb-3">
-      <div className="px-2 py-2">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="px-4 py-3 border-b border-sidebar-border shrink-0">
         <div className="flex items-center gap-2 text-xs font-medium text-sidebar-foreground">
           <FolderOpen className="h-3.5 w-3.5 text-sidebar-primary" />
           <span className="truncate">{basename(cwd) || 'workspace'}</span>
@@ -159,7 +163,7 @@ function WorkspacePanel({
         <p className="mt-0.5 truncate text-[10px] text-muted-foreground" title={cwd}>{cwd}</p>
       </div>
 
-      <div className="px-2 pb-2">
+      <div className="px-3 py-2 border-b border-sidebar-border shrink-0">
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
@@ -171,7 +175,7 @@ function WorkspacePanel({
         </div>
       </div>
 
-      <div className="flex items-center gap-1 px-2 pb-1">
+      <div className="flex items-center gap-1 px-3 py-2 shrink-0">
         <Button
           variant="ghost"
           size="sm"
@@ -195,61 +199,83 @@ function WorkspacePanel({
         </Button>
       </div>
 
-      {folderError && <p className="px-2 py-1 text-xs text-destructive">{folderError}</p>}
-      <div className="max-h-48 overflow-hidden px-1">
-        {filteredFolders.map(f => {
-          const full = joinPath(browsePath, f.name);
-          return (
-            <button
-              key={full}
-              onClick={() => chooseCwd(full)}
-              onDoubleClick={() => { setBrowsePath(full); refreshFolders(full); }}
-              className={cn(
-                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
-                cwd === full ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-              )}
-              title={full}
-            >
-              <Folder className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{f.name}</span>
-            </button>
-          );
-        })}
+      <div className="flex min-h-0 flex-1 flex-col border-b border-sidebar-border">
+        <div className="flex items-center justify-between px-4 py-1.5 shrink-0">
+          <span className="text-xs font-medium text-sidebar-foreground">Folders</span>
+          <span className="text-[10px] text-muted-foreground">{filteredFolders.length}</span>
+        </div>
+        {folderError && <p className="px-4 py-1 text-xs text-destructive">{folderError}</p>}
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="px-2 pb-2">
+            {filteredFolders.map(f => {
+              const full = joinPath(browsePath, f.name);
+              return (
+                <button
+                  key={full}
+                  onClick={() => chooseCwd(full)}
+                  onDoubleClick={() => { setBrowsePath(full); refreshFolders(full); }}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                    cwd === full ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                  )}
+                  title={full}
+                >
+                  <Folder className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{f.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </ScrollArea>
       </div>
 
-      <Separator className="my-3 bg-sidebar-border" />
-
-      <div className="px-2">
-        <div className="flex items-center justify-between gap-2 pb-1">
-          <span className="text-xs font-medium text-sidebar-foreground">Sessions</span>
-          <span className="text-[10px] text-muted-foreground">{agentId}</span>
-        </div>
-        {folderSessions.length === 0 ? (
-          <p className="py-2 text-xs text-muted-foreground">No sessions in this folder</p>
-        ) : (
-          <div className="flex flex-col gap-0.5">
-            {folderSessions.map(s => (
-              <button
-                key={s.sid}
-                onClick={() => { onSelectSession(s.sid); onNav('history'); }}
-                className={cn(
-                  'rounded-md px-2 py-1.5 text-left text-xs transition-colors',
-                  selectedSid === s.sid ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-                )}
-              >
-                <span className="block truncate font-medium">{s.title || s.sid}</span>
-                <span className="block truncate text-[10px] opacity-70">{fmtRelTime(s.last)} · {(s.events || 0)} ev</span>
-              </button>
-            ))}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="px-3 py-2 shrink-0">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              value={sessionFilter}
+              onChange={e => setSessionFilter(e.target.value)}
+              placeholder="Filter sessions"
+              className="h-8 pl-8 text-xs bg-background/70"
+            />
           </div>
-        )}
+        </div>
+        <div className="flex items-center justify-between gap-2 px-4 pb-1 shrink-0">
+          <span className="text-xs font-medium text-sidebar-foreground">Sessions</span>
+          <span className="text-[10px] text-muted-foreground">{agentId} · {folderSessions.length}</span>
+        </div>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="px-2 pb-3">
+            {folderSessions.length === 0 ? (
+              <p className="px-2 py-2 text-xs text-muted-foreground">No sessions in this folder</p>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                {folderSessions.map(s => (
+                  <button
+                    key={s.sid}
+                    onClick={() => { onSelectSession(s.sid); onNav('history'); }}
+                    className={cn(
+                      'rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                      selectedSid === s.sid ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                    )}
+                    title={s.title || s.sid}
+                  >
+                    <span className="block truncate font-medium">{s.title || s.sid}</span>
+                    <span className="block truncate text-[10px] opacity-70">{fmtRelTime(s.last)} · {(s.events || 0)} ev</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </ScrollArea>
       </div>
     </div>
   );
 }
 
 function DesktopSidebar(props) {
-  const { tab, onNav, health, live } = props;
+  const { tab, onNav, health } = props;
   const ok = health.status === 'ok';
   return (
     <aside className="hidden lg:flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar h-screen sticky top-0">
@@ -259,8 +285,6 @@ function DesktopSidebar(props) {
       </div>
       <ScrollArea className="flex-1">
         <NavList tab={tab} onNav={onNav} />
-        <Separator className="my-2 bg-sidebar-border" />
-        <WorkspacePanel {...props} />
       </ScrollArea>
       <div className="px-4 py-3 border-t border-sidebar-border">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -269,13 +293,15 @@ function DesktopSidebar(props) {
             : <WifiOff className="h-3 w-3 text-red-500" />}
           <span className="truncate">{ok ? (health.ws === 'reconnecting' ? 'ws reconnecting…' : 'connected') : 'offline'}</span>
         </div>
-        {tab === 'history' && live.connected && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
-            <span>live · {live.eventCount} events</span>
-          </div>
-        )}
       </div>
+    </aside>
+  );
+}
+
+function WorkspaceSidebar(props) {
+  return (
+    <aside className="hidden lg:flex h-screen w-72 shrink-0 flex-col border-r border-sidebar-border bg-sidebar/80 sticky top-0">
+      <WorkspacePanel {...props} />
     </aside>
   );
 }
@@ -506,7 +532,7 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
   return (
     <div className="flex h-full overflow-hidden">
       {/* session list panel */}
-      <div className="w-full lg:w-72 xl:w-80 shrink-0 flex flex-col border-r border-border h-full overflow-hidden">
+      <div className="hidden">
         <div className="p-3 border-b border-border space-y-2 shrink-0">
           <div className="flex items-center gap-2">
             {live.connected
@@ -1106,6 +1132,12 @@ export default function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <DesktopSidebar
+        tab={tab}
+        onNav={navTo}
+        health={health}
+        live={live}
+      />
+      <WorkspaceSidebar
         tab={tab}
         onNav={navTo}
         health={health}
