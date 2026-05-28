@@ -95,12 +95,28 @@ function joinPath(root, name) {
 }
 
 function activeAgentId(selectedModel) {
-  if (!selectedModel || /^[a-z][a-z0-9-]*$/.test(selectedModel)) return selectedModel || 'claude-code';
-  return 'claude-code';
+  if (!selectedModel) return 'claude-code';
+  if (selectedModel.startsWith('claude')) return 'claude-code';
+  return selectedModel;
 }
 
 function sessionAgentId(session) {
   return session?.agentId || session?.agent || 'claude-code';
+}
+
+function eventsToMessages(events) {
+  const msgs = [];
+  for (const ev of (events || [])) {
+    const txt = (ev.text || '').trim();
+    if (!txt) continue;
+    const t = ev.ts ? new Date(ev.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    if (ev.role === 'user' && ev.type !== 'tool_result') {
+      msgs.push({ role: 'user', content: txt, time: t });
+    } else if (ev.role === 'assistant' && (ev.type === 'text' || ev.type === 'tool_use')) {
+      msgs.push({ role: 'assistant', content: ev.type === 'tool_use' ? `🔧 ${ev.tool || 'tool'}: ${txt.slice(0, 200)}` : txt, time: t });
+    }
+  }
+  return msgs;
 }
 
 // ─── Sidebar nav list ──────────────────────────────────────────────────────
@@ -129,14 +145,15 @@ function NavList({ tab, onNav, onClose }) {
 // ─── Desktop sidebar ───────────────────────────────────────────────────────
 function WorkspacePanel({
   backend, cwd, setCwd, browsePath, setBrowsePath, folders, folderFilter, setFolderFilter,
-  folderError, sessions, selectedSid, selectedModel, onSelectSession, onNav, refreshFolders,
-  agentFilter, setAgentFilter, historyAgents,
+  folderError, sessions, selectedSid, selectedModel, onResumeInChat, onNav, refreshFolders,
+  agentFilter,
 }) {
   const [sessionFilter, setSessionFilter] = useState('');
   const filteredFolders = folders
     .filter(f => !folderFilter.trim() || f.name.toLowerCase().includes(folderFilter.trim().toLowerCase()));
+  const isClaudeFilter = agentFilter === 'all' || agentFilter === 'claude-code';
   const folderSessions = (Array.isArray(sessions) ? sessions : [])
-    .filter(s => (s.cwd || '') === cwd)
+    .filter(s => !isClaudeFilter || (s.cwd || '') === cwd)
     .filter(s => agentFilter === 'all' || (s.agentId || 'claude-code') === agentFilter)
     .filter(s => !s.isSubagent)
     .filter(s => {
@@ -170,33 +187,43 @@ function WorkspacePanel({
             value={folderFilter}
             onChange={e => setFolderFilter(e.target.value)}
             placeholder="Filter folders"
-            className="h-8 pl-8 text-xs bg-background/70"
+            className="h-8 pl-8 pr-7 text-xs bg-background/70"
           />
+          {folderFilter && (
+            <button
+              onClick={() => setFolderFilter('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="flex items-center gap-1 px-3 py-2 shrink-0">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 px-2 text-xs"
-          onClick={() => {
-            const parent = dirname(browsePath);
-            setBrowsePath(parent);
-            refreshFolders(parent);
-          }}
+      <div className="flex items-center gap-0.5 px-2 py-1.5 shrink-0 flex-wrap">
+        <button
+          className="h-6 px-1 text-muted-foreground hover:text-foreground rounded"
+          title="Go up"
+          onClick={() => { const p = dirname(browsePath); chooseCwd(p); }}
         >
           <ArrowUp className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 min-w-0 flex-1 justify-start px-2 text-xs"
-          title={browsePath}
-          onClick={() => chooseCwd(browsePath)}
-        >
-          <span className="truncate">{basename(browsePath) || '/'}</span>
-        </Button>
+        </button>
+        {browsePath.split('/').filter(Boolean).map((seg, i, arr) => {
+          const segPath = '/' + arr.slice(0, i + 1).join('/');
+          return (
+            <React.Fragment key={segPath}>
+              <span className="text-[10px] text-muted-foreground/40">/</span>
+              <button
+                onClick={() => chooseCwd(segPath)}
+                className={cn(
+                  'text-[10px] px-1 rounded truncate max-w-[80px]',
+                  browsePath === segPath ? 'text-foreground font-medium' : 'text-muted-foreground hover:text-foreground'
+                )}
+                title={segPath}
+              >{seg}</button>
+            </React.Fragment>
+          );
+        })}
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col border-b border-sidebar-border">
@@ -237,22 +264,18 @@ function WorkspacePanel({
               value={sessionFilter}
               onChange={e => setSessionFilter(e.target.value)}
               placeholder="Filter sessions"
-              className="h-8 pl-8 text-xs bg-background/70"
+              className="h-8 pl-8 pr-7 text-xs bg-background/70"
             />
+            {sessionFilter && (
+              <button
+                onClick={() => setSessionFilter('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
-        {historyAgents?.length > 0 && (
-          <div className="flex flex-wrap gap-1 px-3 pb-1.5 shrink-0">
-            {[{ id: 'all', label: 'all' }, { id: 'claude-code', label: 'claude' }, ...historyAgents].map(a => (
-              <button
-                key={a.id}
-                onClick={() => setAgentFilter(a.id)}
-                className={cn('text-[10px] px-1.5 py-0.5 rounded border transition-colors',
-                  agentFilter === a.id ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground')}
-              >{a.label || a.id}</button>
-            ))}
-          </div>
-        )}
         <div className="flex items-center justify-between gap-2 px-4 pb-1 shrink-0">
           <span className="text-xs font-medium text-sidebar-foreground">Sessions</span>
           <span className="text-[10px] text-muted-foreground">{folderSessions.length}</span>
@@ -260,13 +283,13 @@ function WorkspacePanel({
         <ScrollArea className="min-h-0 flex-1">
           <div className="px-2 pb-3">
             {folderSessions.length === 0 ? (
-              <p className="px-2 py-2 text-xs text-muted-foreground">No sessions in this folder</p>
+              <p className="px-2 py-2 text-xs text-muted-foreground">No sessions for {agentFilter === 'claude-code' ? 'Claude' : agentFilter}</p>
             ) : (
               <div className="flex flex-col gap-0.5">
                 {folderSessions.map(s => (
                   <button
                     key={s.sid}
-                    onClick={() => { onSelectSession(s.sid, s.agentId); onNav('history'); }}
+                    onClick={() => onResumeInChat(s)}
                     className={cn(
                       'rounded-md px-2 py-1.5 text-left text-xs transition-colors',
                       selectedSid === s.sid ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
@@ -275,7 +298,7 @@ function WorkspacePanel({
                   >
                     <span className="block truncate font-medium">{s.title || s.sid}</span>
                     <span className="block truncate text-[10px] opacity-70">
-                      {s.agentId && s.agentId !== 'claude-code' ? s.agentId + ' · ' : ''}{fmtRelTime(s.last)} · {(s.events || 0)} ev
+                      {fmtRelTime(s.last)} · {(s.events || 0)} ev
                     </span>
                   </button>
                 ))}
@@ -407,13 +430,13 @@ function ChatTab({ state, dispatch, models, selectedModel, setSelectedModel }) {
           </Select>
         </div>
         {state.resumeSid && (
-          <Badge variant="outline" className="text-xs gap-1 shrink-0">
-            <Play className="h-3 w-3" />
-            resuming {state.resumeSid.slice(0, 8)}…
-            <button onClick={() => dispatch({ type: 'CLEAR_RESUME' })} className="ml-1 hover:text-destructive">
+          <span className="text-[10px] text-muted-foreground flex items-center gap-1 shrink-0 border border-border rounded px-1.5 py-0.5">
+            <RefreshCw className="h-3 w-3" />
+            {state.resumeSid.slice(0, 8)}
+            <button onClick={() => dispatch({ type: 'CLEAR_RESUME' })} className="hover:text-destructive ml-0.5">
               <X className="h-3 w-3" />
             </button>
-          </Badge>
+          </span>
         )}
         {state.busy
           ? <Button size="sm" variant="outline" onClick={() => dispatch({ type: 'CANCEL' })} className="shrink-0 h-8 gap-1.5">
@@ -514,7 +537,8 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
 
   const visibleSessions = (() => {
     let arr = Array.isArray(sessions) ? sessions : [];
-    if (cwd) arr = arr.filter(s => (s.cwd || '') === cwd);
+    const cwdFilter = agentFilter === 'all' || agentFilter === 'claude-code';
+    if (cwd && cwdFilter) arr = arr.filter(s => (s.cwd || '') === cwd);
     if (agentFilter !== 'all') arr = arr.filter(s => (s.agentId || 'claude-code') === agentFilter);
     if (!showSubagents) arr = arr.filter(s => !s.isSubagent);
     if (projectFilter) {
@@ -707,11 +731,9 @@ function HistoryTab({ sessions, selectedSid, events, historyError, searchQ, setS
                 : selectedSid}
             </p>
             <div className="flex gap-2 mt-3">
-              {(!sess?.agentId || sess.agentId === 'claude-code') && (
-                <Button size="sm" onClick={() => onResumeInChat(sess || { sid: selectedSid })} className="h-8 gap-1.5 text-xs">
-                  <Play className="h-3.5 w-3.5" /> Open in chat
-                </Button>
-              )}
+              <Button size="sm" onClick={() => onResumeInChat(sess || { sid: selectedSid })} className="h-8 gap-1.5 text-xs">
+                <Play className="h-3.5 w-3.5" /> Open in chat
+              </Button>
               <Button size="sm" variant="outline" onClick={() => { try { navigator.clipboard.writeText(selectedSid); } catch {} }} className="h-8 gap-1.5 text-xs">
                 <Copy className="h-3.5 w-3.5" /> Copy SID
               </Button>
@@ -900,7 +922,8 @@ function chatReducer(state, action) {
     case 'DONE':
       return { ...state, busy: false, _abort: null };
     case 'RESUME':
-      return { ...state, resumeSid: action.sid, messages: [], draft: '' };
+      state._abort?.abort();
+      return { ...state, resumeSid: action.sid, messages: action.messages || [], draft: '', busy: false, _abort: null };
     case 'CLEAR_RESUME':
       return { ...state, resumeSid: null };
     default:
@@ -1101,11 +1124,23 @@ export default function App() {
     }
   }, [tab, refreshHistory, openLiveStream, closeLiveStream]);
 
-  const resumeInChat = useCallback((sess) => {
+  const resumeInChat = useCallback(async (sess) => {
+    const sid = sess?.sid || selectedSid;
+    const agentId = sess?.agentId || selectedSidAgent || 'claude-code';
+    setSelectedModel(agentId);
+    setSelectedSid(sid);
     navTo('chat');
-    dispatchChat({ type: 'RESUME', sid: sess?.sid || selectedSid });
-    setSelectedModel(m => (!m || m !== 'claude-code') ? 'claude-code' : m);
-  }, [navTo, selectedSid]);
+    try {
+      const isCC = !agentId || agentId === 'claude-code';
+      let evs = isCC
+        ? (cwd ? await B.getSessionEventsForCwd(backend, sid, cwd).catch(() => []) : [])
+        : await B.getAgentSessionEvents(backend, sid).catch(() => []);
+      if (!evs.length && isCC) evs = await B.getSessionEvents(backend, sid).catch(() => []);
+      dispatchChat({ type: 'RESUME', sid, messages: eventsToMessages(evs) });
+    } catch {
+      dispatchChat({ type: 'RESUME', sid, messages: [] });
+    }
+  }, [navTo, selectedSid, selectedSidAgent, backend, cwd]);
 
   // Search
   useEffect(() => {
@@ -1217,11 +1252,9 @@ export default function App() {
         sessions={sessions}
         selectedSid={selectedSid}
         selectedModel={selectedModel}
-        onSelectSession={loadSession}
+        onResumeInChat={resumeInChat}
         refreshFolders={refreshFolders}
         agentFilter={agentFilter}
-        setAgentFilter={setAgentFilter}
-        historyAgents={historyAgents}
       />
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
@@ -1242,11 +1275,9 @@ export default function App() {
           sessions={sessions}
           selectedSid={selectedSid}
           selectedModel={selectedModel}
-          onSelectSession={loadSession}
+          onResumeInChat={resumeInChat}
           refreshFolders={refreshFolders}
           agentFilter={agentFilter}
-          setAgentFilter={setAgentFilter}
-          historyAgents={historyAgents}
         />
 
         <main className="flex-1 overflow-hidden">

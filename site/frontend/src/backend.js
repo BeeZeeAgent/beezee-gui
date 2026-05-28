@@ -266,11 +266,12 @@ export async function* streamChat(base, { model, messages, signal, agentId, resu
   let resolvedAgentId = agentId;
   let resolvedModel = model;
   if (!resolvedAgentId) {
-    if (!model || /^[a-z][a-z0-9-]*$/.test(model)) {
-      // Bare slug — treat as agentId.
+    if (!model || !model.startsWith('claude')) {
+      // Non-claude string (codex, opencode, pi-agent, etc.) — treat as agentId.
       resolvedAgentId = model || 'claude-code';
       resolvedModel = undefined;
     } else {
+      // claude-* model ID — keep as model, default agent to claude-code.
       resolvedAgentId = 'claude-code';
     }
   }
