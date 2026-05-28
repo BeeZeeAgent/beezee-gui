@@ -1006,7 +1006,7 @@ export default function App() {
         if (ev.type === 'commands' && ev.commands?.length) {
           dispatchChat({ type: 'APPEND', text: '\n\nCommands: ' + ev.commands.map(c => '/' + c.name).join(', ') });
         }
-        if (ev.type === 'error') dispatchChat({ type: 'APPEND', text: '\n[error] ' + JSON.stringify(ev.error) });
+        if (ev.type === 'error') dispatchChat({ type: 'APPEND', text: '\n⚠️ ' + (typeof ev.error === 'string' ? ev.error : JSON.stringify(ev.error)) });
       }
     } catch (e) {
       if (e.name !== 'AbortError') dispatchChat({ type: 'APPEND', text: '\n[error] ' + e.message });
