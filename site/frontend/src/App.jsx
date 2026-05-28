@@ -146,15 +146,14 @@ function NavList({ tab, onNav, onClose }) {
 function WorkspacePanel({
   backend, cwd, setCwd, browsePath, setBrowsePath, folders, folderFilter, setFolderFilter,
   folderError, sessions, selectedSid, selectedModel, onResumeInChat, onNav, refreshFolders,
-  agentFilter, fileBackedSids,
+  agentFilter,
 }) {
   const [sessionFilter, setSessionFilter] = useState('');
   const filteredFolders = folders
     .filter(f => !folderFilter.trim() || f.name.toLowerCase().includes(folderFilter.trim().toLowerCase()));
   const isClaudeFilter = agentFilter === 'all' || agentFilter === 'claude-code';
   const folderSessions = (Array.isArray(sessions) ? sessions : [])
-    // For claude-code: only show sessions backed by real JSONL files (fileBackedSids), not ccsniff ghosts
-    .filter(s => !isClaudeFilter || fileBackedSids.has(s.sid))
+    .filter(s => !isClaudeFilter || (s.cwd || '') === cwd)
     .filter(s => agentFilter === 'all' || (s.agentId || 'claude-code') === agentFilter)
     .filter(s => !s.isSubagent)
     .filter(s => {
@@ -961,7 +960,6 @@ export default function App() {
   const [projectFilter, setProjectFilter] = useState('');
   const [agentFilter, setAgentFilter] = useState('all');
   const [historyAgents, setHistoryAgents] = useState([]);
-  const [fileBackedSids, setFileBackedSids] = useState(new Set());
   const [live, setLive] = useState({ es: null, connected: false, lastEventTs: 0, error: null, eventCount: 0, reconnects: 0 });
   const liveRef = useRef(live);
   liveRef.current = live;
@@ -1041,8 +1039,6 @@ export default function App() {
       for (const s of [...baseSessions, ...cwdSessions]) bySid.set(s.sid, { ...s, agentId: s.agentId || 'claude-code' });
       for (const s of agentSessions) if (!bySid.has(s.sid)) bySid.set(s.sid, s);
       setSessions([...bySid.values()]);
-      // Track which claude-code sessions are actually file-backed (from cwdSessions = real disk scan)
-      setFileBackedSids(new Set(cwdSessions.map(s => s.sid)));
       setHistoryError(null);
     } catch (e) {
       setHistoryError(e.message);
@@ -1259,7 +1255,6 @@ export default function App() {
         onResumeInChat={resumeInChat}
         refreshFolders={refreshFolders}
         agentFilter={agentFilter}
-        fileBackedSids={fileBackedSids}
       />
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
