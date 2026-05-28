@@ -100,6 +100,8 @@ function activeAgentId(selectedModel) {
   return selectedModel;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function sessionAgentId(session) {
   return session?.agentId || session?.agent || 'claude-code';
 }
@@ -1036,7 +1038,10 @@ export default function App() {
         B.listAgentSessions(backend).catch(() => []),
       ]);
       const bySid = new Map();
-      for (const s of [...baseSessions, ...cwdSessions]) bySid.set(s.sid, { ...s, agentId: s.agentId || 'claude-code' });
+      for (const s of [...baseSessions, ...cwdSessions]) {
+        if (!UUID_RE.test(s.sid)) continue; // drop ccsniff junk like launchpad-sync-codex-*
+        bySid.set(s.sid, { ...s, agentId: s.agentId || 'claude-code' });
+      }
       for (const s of agentSessions) if (!bySid.has(s.sid)) bySid.set(s.sid, s);
       setSessions([...bySid.values()]);
       setHistoryError(null);
